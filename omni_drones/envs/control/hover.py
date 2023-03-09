@@ -48,7 +48,7 @@ class Hover(IsaacEnv):
             dynamic_friction=1.0,
             restitution=0.0,
         )
-        self.drone.spawn(translation=(0., 0., 1.))
+        self.drone.spawn(translations=[(0., 0., 1.)])
         return ["/World/defaultGroundPlane"]
     
     def _reset_idx(self, env_ids: torch.Tensor):
@@ -96,6 +96,7 @@ class Hover(IsaacEnv):
             "reward": {
                 "drone.reward": reward.unsqueeze(-1)
             },
+            "return": self._tensordict["return"],
             "done": done
         }, self.batch_size)
 

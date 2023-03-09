@@ -1,7 +1,7 @@
 import abc
 import torch
 
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Type
 from torchrl.envs import EnvBase
 from torchrl.data import TensorSpec, CompositeSpec
 from tensordict.tensordict import TensorDict, TensorDictBase
@@ -23,7 +23,7 @@ class IsaacEnv(EnvBase):
     env_ns = "/World/envs"
     template_env_ns = "/World/envs/env_0"
 
-    REGISTRY: Dict[str, "IsaacEnv"] = {}
+    REGISTRY: Dict[str, Type["IsaacEnv"]] = {}
 
     def __init__(self, cfg, headless):
         super().__init__(
@@ -37,6 +37,7 @@ class IsaacEnv(EnvBase):
         # extract commonly used parameters
         self.num_envs = self.cfg.env.num_envs
         self.max_eposode_length = self.cfg.env.max_episode_length
+        self.min_episode_length = self.cfg.env.min_episode_length
         # check that simulation is running
         if stage_utils.get_current_stage() is None:
             raise RuntimeError(
@@ -108,6 +109,7 @@ class IsaacEnv(EnvBase):
             raise ValueError
         super().__init_subclass__(**kwargs)
         IsaacEnv.REGISTRY[cls.__name__] = cls
+        IsaacEnv.REGISTRY[cls.__name__.lower()] = cls
 
     @property
     def agent_spec(self):
@@ -152,7 +154,7 @@ class IsaacEnv(EnvBase):
         self._reset_idx(env_ids)
         self.sim.step(render=False)
         self._tensordict.masked_fill_(env_mask, 0)
-        return self._compute_state_and_obs()
+        return self._tensordict.update(self._compute_state_and_obs())
 
     @abc.abstractmethod
     def _reset_idx(self, env_ids: torch.Tensor):
@@ -161,10 +163,10 @@ class IsaacEnv(EnvBase):
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         self._pre_sim_step(tensordict)
         for _ in range(1):
-            self.sim.step(render=not self.cfg.headless)
-        tensordict = TensorDict({}, self.batch_size)
-        tensordict.update(self._compute_state_and_obs())
-        tensordict.update(self._compute_reward_and_done())
+            self.sim.step(self.enable_render)
+        tensordict = TensorDict({"next": {}}, self.batch_size)
+        tensordict["next"].update(self._compute_state_and_obs())
+        tensordict["next"].update(self._compute_reward_and_done())
         # done决定重置，用buf2解决；buf代表第一次抓到的步数
         self.progress_buf += (1 - tensordict['caught']*1.0)
         return tensordict
@@ -173,11 +175,11 @@ class IsaacEnv(EnvBase):
         pass
     
     @abc.abstractmethod
-    def _compute_state_and_obs(self):
+    def _compute_state_and_obs(self) -> TensorDictBase:
         raise NotImplementedError
     
     @abc.abstractmethod
-    def _compute_reward_and_done(self):
+    def _compute_reward_and_done(self) -> TensorDictBase:
         raise NotImplementedError
 
     def _set_seed(self, seed: Optional[int]=-1):
@@ -238,7 +240,8 @@ class _AgentSpecView(Dict[str, AgentSpec]):
                 self.env.observation_spec[f"{name}.state"] = __value.state_spec.expand(*shape)
             self.env.action_spec[f"{name}.action"] = expand(__value.action_spec)
             self.env.reward_spec[f"{name}.reward"] = expand(__value.reward_spec)
-            self.env._tensordict[f"{name}.return"] = self.env.reward_spec[f"{name}.reward"].zero()
+            
+            self.env._tensordict["return"] = self.env.reward_spec[f"{name}.reward"].zero()
             super().__setitem__(__key, __value)
             self.env._agent_spec[__key] = __value
         else:

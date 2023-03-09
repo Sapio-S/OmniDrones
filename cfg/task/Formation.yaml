@@ -1,0 +1,5 @@
+name: Formation
+
+drone_model: Crazyflie
+
+formation: tetragon
