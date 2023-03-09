@@ -16,7 +16,7 @@ from functorch import vmap
 def main(cfg):
     cfg.train = 0
     cfg.wandb.mode = 'disabled'
-    cfg.env.num_envs = 2
+    cfg.env.num_envs = 4
     cfg.headless = 0
     cfg.use_load = 1
     OmegaConf.resolve(cfg)
@@ -76,6 +76,8 @@ def main(cfg):
     def record_and_log_stats(done: torch.Tensor):
         done = done.squeeze(-1)
         assert done.any() == 1
+        print(env._tensordict[done]["progress"])
+        #只是选出了done的，不意味着成功reset的多
         episode_stats.append(env._tensordict[done].select("drone.return", "progress"))
         if sum(map(len, episode_stats)) >= 4096:
             print()

@@ -346,20 +346,26 @@ class MAPPOPolicy(ActorCriticPolicy):
         
     def state_dict(self):
         state_dict =  {
-            "actor": self.actor.state_dict(),
+            "actor": self.actor_func_module,
             "actor_opt_state": self.actor_opt_state,
             "critic": self.critic.state_dict(),
             "critic_opt": self.critic_opt.state_dict()
         }
+        (fmodel, params, buffers) = state_dict["actor"]
         if hasattr(self, "critic_opt_scheduler"):
             state_dict["critic_opt_scheduler"] = self.critic_opt_scheduler.state_dict()
         return state_dict
     
     def load_state_dict(self, state_dict: Dict[str, Any]):
-        self.actor.load_state_dict(state_dict["actor"])
+        self.actor_func_module = (fmodel, params, buffers) = state_dict["actor"]
+        self.actor_func = functorch.vmap(fmodel, in_dims=(None, None, 1), out_dims=1, randomness="different")
         self.actor_opt_state = state_dict["actor_opt_state"]
         self.critic.load_state_dict(state_dict["critic"])
         self.critic_opt.load_state_dict(state_dict["critic_opt"])
+        return state_dict
+    
+    def save(self):
+        torch.save(self.state_dict(), 'model.pkl')
 
 
 from .utils.network import ENCODERS_MAP, SplitEmbedding, MLP

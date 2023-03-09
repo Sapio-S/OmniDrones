@@ -3,6 +3,7 @@ import functorch
 from torchrl.data import UnboundedContinuousTensorSpec
 from tensordict.tensordict import TensorDict, TensorDictBase
 
+
 import omni.isaac.core.utils.torch as torch_utils
 from omni.isaac.core.objects import VisualSphere
 
@@ -84,7 +85,7 @@ class Hover(IsaacEnv):
         spin_reward = 1.0 / (1.0 + torch.square(spin))
 
         assert pos_reward.shape == up_reward.shape == spin_reward.shape
-        reward = pos_reward + pos_reward * (up_reward + spin_reward) # + effort_reward
+        reward = pos_reward + pos_reward * (up_reward + spin_reward)  + effort_reward
         self._tensordict["drone.return"] += reward.unsqueeze(-1)
         done  = (
             (self.progress_buf >= self.max_eposode_length).unsqueeze(-1)

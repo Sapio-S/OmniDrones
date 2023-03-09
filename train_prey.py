@@ -14,11 +14,8 @@ from functorch import vmap
 
 @hydra.main(version_base=None, config_path=CONFIG_PATH, config_name="config")
 def main(cfg):
-    cfg.train = 0
-    cfg.wandb.mode = 'disabled'
-    cfg.env.num_envs = 2
-    cfg.headless = 0
-    cfg.use_load = 1
+    cfg.use_load = 0
+    # cfg.wandb.mode = 'disabled'
     OmegaConf.resolve(cfg)
     OmegaConf.set_struct(cfg, False)
     print(cfg.wandb)
@@ -33,12 +30,9 @@ def main(cfg):
     agent_spec = env.agent_spec["drone"]
 
     ppo = MAPPOPolicy(cfg.algo, agent_spec, act_name="drone.control_target", device="cuda")
-    state1 = ppo.state_dict()
     if os.path.exists('model.pkl') and cfg.use_load:
         ppo.load_state_dict(torch.load('model.pkl'))
-        state2 = ppo.state_dict()
         print("Successfully load model!")
-        # assert state1 != state2
 
     # ppo.load_state_dict()
     controller = env.drone.default_controller(
@@ -73,9 +67,9 @@ def main(cfg):
     )
 
     episode_stats = []
+    # callback for reset
     def record_and_log_stats(done: torch.Tensor):
         done = done.squeeze(-1)
-        assert done.any() == 1
         episode_stats.append(env._tensordict[done].select("drone.return", "progress"))
         if sum(map(len, episode_stats)) >= 4096:
             print()
@@ -97,8 +91,8 @@ def main(cfg):
             "rollout_fps": collector._fps,
             "frames": collector._frames
         })
-        # if i%1e3==0:
-        #     ppo.save()
+        if i%1e3==0 and i>0:
+            ppo.save()
         
     simulation_app.close()
 

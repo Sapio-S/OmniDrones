@@ -1,9 +1,12 @@
-headless: false
+train: 1
+
+headless: 1
+use_load: 0
 
 env:
   num_envs: 4096
   env_spacing: 2.5
-  max_episode_length: 500
+  max_episode_length: 300
 
 sim:
   dt: 0.016
@@ -34,9 +37,9 @@ wandb:
   group: ${oc.select:..task.name}
   run_name: ${oc.select:..task.name,test}
   job_type: train
-  entity: marl-drones
+  entity: 
   project: gpu-onpolicy
-  mode: online # set to 'disabled' when debugging locally
+  mode: online  #online # set to 'disabled' when debugging locally
   run_id: 
   run_path:
   monitor_gym: True

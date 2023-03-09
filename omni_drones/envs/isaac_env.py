@@ -162,10 +162,11 @@ class IsaacEnv(EnvBase):
         self._pre_sim_step(tensordict)
         for _ in range(1):
             self.sim.step(render=not self.cfg.headless)
-        self.progress_buf += 1
         tensordict = TensorDict({}, self.batch_size)
         tensordict.update(self._compute_state_and_obs())
         tensordict.update(self._compute_reward_and_done())
+        # done决定重置，用buf2解决；buf代表第一次抓到的步数
+        self.progress_buf += (1 - tensordict['caught']*1.0)
         return tensordict
 
     def _pre_sim_step(self, tensordict: TensorDictBase):
