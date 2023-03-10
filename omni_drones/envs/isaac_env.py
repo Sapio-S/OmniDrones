@@ -97,8 +97,10 @@ class IsaacEnv(EnvBase):
         
         self._tensordict = TensorDict({
             "progress": torch.zeros(self.num_envs, device=self.device),
+            "success": torch.zeros(self.num_envs, device=self.device),
         }, self.batch_size)
-        self.progress_buf = self._tensordict["progress"]
+        self.progress_buf = self._tensordict["progress"] #指针绑定
+        self.success_buf = self._tensordict["success"]
         self.observation_spec = CompositeSpec(shape=self.batch_size)
         self.action_spec = CompositeSpec(shape=self.batch_size)
         self.reward_spec = CompositeSpec(shape=self.batch_size)
@@ -160,15 +162,17 @@ class IsaacEnv(EnvBase):
     def _reset_idx(self, env_ids: torch.Tensor):
         raise NotImplementedError
     
+    # 建议不要在基类里改！
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         self._pre_sim_step(tensordict)
         for _ in range(1):
             self.sim.step(self.enable_render)
+        self.progress_buf += 1
         tensordict = TensorDict({"next": {}}, self.batch_size)
         tensordict["next"].update(self._compute_state_and_obs())
         tensordict["next"].update(self._compute_reward_and_done())
         # done决定重置，用buf2解决；buf代表第一次抓到的步数
-        self.progress_buf += (1 - tensordict['caught']*1.0)
+        
         return tensordict
 
     def _pre_sim_step(self, tensordict: TensorDictBase):

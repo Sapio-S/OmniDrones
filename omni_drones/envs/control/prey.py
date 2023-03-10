@@ -30,7 +30,7 @@ class Prey(IsaacEnv):
         self.env_ids = torch.from_numpy(np.arange(0,cfg.env.num_envs))
         self.env_width = cfg.env.env_spacing/2.0
         self.progress_buf2 = self.progress_buf*1.0
-        self.caught = self.progress_buf2.unsqueeze(-1)*0
+        self.caught = self.progress_buf2*0
         self.init_poses = self.drone.get_env_poses(clone=True)
         
         self.agent_spec["drone"] = AgentSpec(
@@ -40,12 +40,17 @@ class Prey(IsaacEnv):
             UnboundedContinuousTensorSpec(1).to(self.device),
         )
         
+        self.task_config = TensorDict({
+            "max_linvel": torch.ones(self.num_envs, 1, device=self.device)
+        }, self.num_envs)
+
         self.vels = self.drone.get_velocities()
         self.init_pos_scale = torch.tensor([2., 2., 0], device=self.device) 
         self.init_pos_offset = torch.tensor([-1., -1., 0], device=self.device)
 
     def _design_scene(self):
         self.num_agents = 3
+        self.v0 = 0.5
         cfg = RobotCfg()
         cfg.rigid_props.max_linear_velocity = 0.5
         self.drone: MultirotorBase = MultirotorBase.REGISTRY["Crazyflie"](cfg=cfg)
@@ -76,10 +81,10 @@ class Prey(IsaacEnv):
         # )
 
         
-        kit_utils.set_nested_rigid_body_properties(
-            prim_path="/World/envs/env_0/target",
-            max_linear_velocity=1.5,
-        )
+        # kit_utils.set_nested_rigid_body_properties(
+        #     prim_path="/World/envs/env_0/target",
+        #     max_linear_velocity=0.5,
+        # )
 
         kit_utils.set_rigid_body_properties(
             prim_path="/World/envs/env_0/target",
@@ -98,7 +103,7 @@ class Prey(IsaacEnv):
             translation[:, 0] = i 
             translation[:, 1] = torch.arange(n)
             translation[:, 2] = 0.5
-        self.drone.spawn(n, translation) #to make n drones
+        self.drone.spawn(translation) #to make n drones
         return ["/World/defaultGroundPlane"]
     
     def _reset_idx(self, env_ids: torch.Tensor):
@@ -112,10 +117,16 @@ class Prey(IsaacEnv):
         self.target.set_world_poses((self.envs_positions + self.target_pos)[env_ids], indices=env_ids)
         self.target.set_velocities(self.target_init_vel[env_ids], indices=env_ids)
 
+        self.task_config.set_at_(
+            "max_linvel",
+            torch.rand(len(env_ids), 1, device=self.device),
+            env_ids
+        )
+
     def _pre_sim_step(self, tensordict: TensorDictBase):
         actions = tensordict["drone.action"]
         self.effort = self.drone.apply_action(actions)
-        self.target.apply_forces(self._get_dummy_policy_prey())
+        # self.target.apply_forces(self._get_dummy_policy_prey())
 
         # restriction on (x,y)
         agent_pos, agent_rot = self.drone.get_env_poses()
@@ -135,9 +146,11 @@ class Prey(IsaacEnv):
         # bounce
         agent_vel = self.drone.get_velocities()
         agent_vel[..., :3] *= agent_reverse
+
         target_vel = self.target.get_velocities()
-        target_vel[..., :3] *= target_reverse
+        target_vel[..., :3] = self._get_dummy_policy_prey() * target_reverse
         target_vel[..., 2] = 0 # z and dz/dt must be both restricted
+
         self.drone.set_velocities(agent_vel, self.env_ids)
         self.target.set_velocities(target_vel, self.env_ids)
 
@@ -146,8 +159,9 @@ class Prey(IsaacEnv):
         prey_state = self.target.get_world_poses()[0] - self.drone._envs_positions.squeeze(1)
         drone_state = self.drone.get_state()
         prey_pos = prey_state.unsqueeze(1).expand(-1,self.num_agents,-1)
+        # obs = torch.cat((drone_state, prey_pos, self.progress_buf2.unsqueeze(-1).expand(-1,self.num_agents).unsqueeze(-1)/self.cfg.env.max_episode_length),-1)
         obs = torch.cat((drone_state, prey_pos),-1)
-        
+
         return TensorDict({
             "drone.obs": obs
         }, self.batch_size)
@@ -157,10 +171,6 @@ class Prey(IsaacEnv):
         prey_state = self.target.get_world_poses()[0] - self.drone._envs_positions.squeeze(1)
         prey_pos = prey_state.unsqueeze(1).expand(-1,self.num_agents,-1)
         target_dist = torch.norm(pos-prey_pos, dim=-1)
-        # pos_reward = 1.0 / (1.0 + torch.square(target_dist))
-        pos_reward = - target_dist
-        # pos_reward = torch.exp(-target_dist)
-        # pos_reward = 1.0/target_dist # prone to over-tilt
         catch_reward = (target_dist < 0.1) * 1.0
 
 
@@ -171,15 +181,16 @@ class Prey(IsaacEnv):
         reward = catch_reward
 # 
         # reward = catch_reward - target_dist
-        self._tensordict["drone.return"] += reward.unsqueeze(-1)
+        self._tensordict["return"] += reward.unsqueeze(-1)
 
         self.progress_buf2 = self.progress_buf2 * (self.progress_buf > 0) + 1
         done  = (
-            (self.progress_buf2 >= self.max_eposode_length).unsqueeze(-1)*1.0
-        )
+            (self.progress_buf2 >= self.max_eposode_length).unsqueeze(-1)  
+            # | (catch_reward.sum(-1) > 0)
+        ) *1.0
         
         caught = (catch_reward > 0) * 1.0
-        self.caught = (self.progress_buf.unsqueeze(-1) > 0) * (self.caught + caught)
+        self.caught = (self.progress_buf > 0) * ((self.caught + caught.any(-1)) > 0) *1.0
 
         #done should be integrated
         return TensorDict({
@@ -187,7 +198,8 @@ class Prey(IsaacEnv):
                 "drone.reward": reward.unsqueeze(-1)
             },
             "done": done.any(-1),
-            "caught": caught.any(-1)
+            "caught": self.caught,
+            "return": self._tensordict["return"]
         }, self.batch_size)
 
     
@@ -198,12 +210,13 @@ class Prey(IsaacEnv):
         dist_pos = torch.norm(prey_pos - pos,dim=-1).unsqueeze(1).expand(-1,-1,3)
         orient = (prey_pos - pos)/dist_pos
         b = 1
-        force = 0.1*(orient*1.0/dist_pos).sum(-2)
-        force += b*torch.tensor([1.,0.,0.], device=self.device)/(1e-8+prey_state[...,0]+self.env_width).unsqueeze(-1)
-        force += b*torch.tensor([-1.,0.,0.], device=self.device)/(1e-8-prey_state[...,0]+self.env_width).unsqueeze(-1)
-        force += b*torch.tensor([0.,1.,0.], device=self.device)/(1e-8+prey_state[...,1]+self.env_width).unsqueeze(-1)
-        force += b*torch.tensor([0.,-1.,0.], device=self.device)/(1e-8-prey_state[...,1]+self.env_width).unsqueeze(-1)
-        return force
+        force = (orient*1.0/dist_pos).sum(-2)
+        force += torch.tensor([1.,0.,0.], device=self.device)/(0.1+prey_state[...,0]+self.env_width).unsqueeze(-1)
+        force += torch.tensor([-1.,0.,0.], device=self.device)/(0.1-prey_state[...,0]+self.env_width).unsqueeze(-1)
+        force += torch.tensor([0.,1.,0.], device=self.device)/(0.1+prey_state[...,1]+self.env_width).unsqueeze(-1)
+        force += torch.tensor([0.,-1.,0.], device=self.device)/(0.1-prey_state[...,1]+self.env_width).unsqueeze(-1)
+        vel = force/(torch.norm(force,dim=-1).unsqueeze(1).expand(-1,3)+1e-5)*self.v0
+        return vel
     
     def _get_dummy_policy_drone(self):
         pos, rot = self.drone.get_env_poses(False)
@@ -213,3 +226,15 @@ class Prey(IsaacEnv):
         _vel = (prey_pos - pos)/dist_pos
         _pos = _vel + pos
         return _pos, _vel
+    
+    def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
+        self._pre_sim_step(tensordict)
+        for _ in range(1):
+            self.sim.step(self.enable_render)
+        tensordict = TensorDict({"next": {}}, self.batch_size)
+        tensordict["next"].update(self._compute_state_and_obs())
+        tensordict["next"].update(self._compute_reward_and_done())
+        # done决定重置，用buf2解决；buf代表第一次抓到的步数
+        self.progress_buf += (1 - tensordict['next']['caught'])*1
+        self.success_buf += tensordict['next']['caught'].sum(-1).expand(self.num_envs)/self.cfg.env.num_envs*100.0 - self.success_buf
+        return tensordict

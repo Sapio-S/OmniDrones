@@ -71,36 +71,18 @@ def main(cfg):
         device="cuda", 
         return_same_td=True,
     )
-
-    episode_stats = []
-    def record_and_log_stats(done: torch.Tensor):
-        done = done.squeeze(-1)
-        assert done.any() == 1
-        print(env._tensordict[done]["progress"])
-        #只是选出了done的，不意味着成功reset的多
-        episode_stats.append(env._tensordict[done].select("drone.return", "progress"))
-        if sum(map(len, episode_stats)) >= 4096:
-            print()
-            stats = {}
-            for k, v in torch.cat(episode_stats).items():
-                v = torch.mean(v).item()
-                stats[k] = v
-                print(f"train/{k}: {v}")
-            run.log(stats)
-            episode_stats.clear()
-    collector.on_reset(record_and_log_stats)
     
     pbar = tqdm(collector)
     for i, data in enumerate(pbar):
         if cfg.train:
             info = ppo.train_op(data.clone())
             run.log(info)
+
+        
         pbar.set_postfix({
             "rollout_fps": collector._fps,
             "frames": collector._frames
         })
-        # if i%1e3==0:
-        #     ppo.save()
         
     simulation_app.close()
 

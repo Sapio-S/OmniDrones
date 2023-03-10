@@ -10,12 +10,15 @@ from setproctitle import setproctitle
 from omni_drones import CONFIG_PATH, init_simulation_app
 from omni_drones.learning.collectors import SyncDataCollector
 from omni_drones.utils.wandb import init_wandb
+from omni_drones.utils.envs.transforms import LogOnEpisode
+
 from functorch import vmap
 
 @hydra.main(version_base=None, config_path=CONFIG_PATH, config_name="config")
 def main(cfg):
     cfg.use_load = 0
     # cfg.wandb.mode = 'disabled'
+    # cfg.env.num_envs = 16
     OmegaConf.resolve(cfg)
     OmegaConf.set_struct(cfg, False)
     print(cfg.wandb)
@@ -56,31 +59,22 @@ def main(cfg):
         tensordict["controller_state"] = controller_state 
         return tensordict
 
-
+    logger = LogOnEpisode(
+        cfg.env.num_envs,
+        in_keys=["return", "progress", "success"],
+        log_keys=["train/return", "train/ep_length", "train/success_rate"],
+        logger_func=run.log
+    )
+        
     collector = SyncDataCollector(
         env, 
         policy, 
+        callback=logger,
         split_trajs=False,
         frames_per_batch=env.num_envs * 8,
         device="cuda", 
         return_same_td=True,
     )
-
-    episode_stats = []
-    # callback for reset
-    def record_and_log_stats(done: torch.Tensor):
-        done = done.squeeze(-1)
-        episode_stats.append(env._tensordict[done].select("drone.return", "progress"))
-        if sum(map(len, episode_stats)) >= 4096:
-            print()
-            stats = {}
-            for k, v in torch.cat(episode_stats).items():
-                v = torch.mean(v).item()
-                stats[k] = v
-                print(f"train/{k}: {v}")
-            run.log(stats)
-            episode_stats.clear()
-    collector.on_reset(record_and_log_stats)
     
     pbar = tqdm(collector)
     for i, data in enumerate(pbar):
