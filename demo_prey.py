@@ -10,14 +10,14 @@ from setproctitle import setproctitle
 from omni_drones import CONFIG_PATH, init_simulation_app
 from omni_drones.learning.collectors import SyncDataCollector
 from omni_drones.utils.wandb import init_wandb
-from functorch import vmap
+from functorch import vmap 
 
 @hydra.main(version_base=None, config_path=CONFIG_PATH, config_name="config")
 def main(cfg):
     cfg.train = 0
     cfg.wandb.mode = 'disabled'
     cfg.env.num_envs = 4
-    cfg.headless = 0
+    cfg.headless = 1
     cfg.use_load = 1
     OmegaConf.resolve(cfg)
     OmegaConf.set_struct(cfg, False)
