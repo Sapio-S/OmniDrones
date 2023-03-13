@@ -29,13 +29,14 @@ class Prey(IsaacEnv):
         self.target_init_vel = self.target.get_velocities(clone=True)
         self.env_ids = torch.from_numpy(np.arange(0,cfg.env.num_envs))
         self.env_width = cfg.env.env_spacing/2.0
+        self.radius = self.env_width
         self.progress_buf2 = self.progress_buf*1.0
         self.caught = self.progress_buf2*0
         self.init_poses = self.drone.get_env_poses(clone=True)
         
         self.agent_spec["drone"] = AgentSpec(
             "drone", self.num_agents, 
-            UnboundedContinuousTensorSpec(26, device=self.device),
+            UnboundedContinuousTensorSpec(27, device=self.device),
             UnboundedContinuousTensorSpec(7, device=self.device),
             UnboundedContinuousTensorSpec(1).to(self.device),
         )
@@ -51,7 +52,7 @@ class Prey(IsaacEnv):
     def _design_scene(self):
         self.num_agents = 3
         self.v_low = 0.5
-        self.v_high = 3
+        self.v_high = self.v_low * 1
         self.v0 = torch.from_numpy(np.random.uniform(self.v_low, self.v_high, [self.num_envs, 1])).to(self.device)
         cfg = RobotCfg()
         cfg.rigid_props.max_linear_velocity = 0.5
@@ -137,24 +138,38 @@ class Prey(IsaacEnv):
         target_pos -= self.envs_positions
         agent_pos2 = agent_pos*1.0
         target_pos2 = target_pos*1.0
-        agent_pos2[...,:2] = agent_pos[...,:2].clamp(-self.env_width, self.env_width)
-        agent_reverse = 1-(agent_pos != agent_pos2)*2.0
-        target_pos2[...,:2] = target_pos[...,:2].clamp(-self.env_width, self.env_width)
-        target_reverse = 1-(target_pos != target_pos2)*2.0
-        target_pos2[...,2] = 0.5
         
-        self.drone.set_env_poses(agent_pos2, agent_rot, self.env_ids)
-        self.target.set_world_poses(target_pos2 + self.envs_positions, target_rot, self.env_ids)
+        agent_norm = torch.norm(agent_pos[...,:2], dim=-1).unsqueeze(-1)
+        agent_pos2[...,:2] = agent_pos[...,:2]/(agent_norm.expand(-1,-1,2)+1e-5)*(agent_norm.clamp_max(self.radius).expand(-1,-1,2))
+        # agent_pos2[...,:2] = agent_pos[...,:2].clamp(-self.env_width, self.env_width)
 
-        # bounce
         agent_vel = self.drone.get_velocities()
-        agent_vel[..., :3] *= agent_reverse
+        agent_bounce = (agent_norm.expand(-1,-1,3)<=self.radius)*1.0
+        agent_vel[...,:3] = agent_vel[...,:3]*agent_bounce + \
+            self.bounce(agent_vel[...,:3], agent_pos2[...,:3])*(1 - agent_bounce)
+
+        # agent_reverse = 1-(agent_pos != agent_pos2)*2.0
+        self.drone.set_env_poses(agent_pos2, agent_rot, self.env_ids)
+        self.drone.set_velocities(agent_vel, self.env_ids)
+
+        # target
+
+        target_norm = torch.norm(target_pos[...,:2], dim=-1).unsqueeze(-1)
+        target_pos2[...,:2] = target_pos[...,:2]/(target_norm.expand(-1,2)+1e-5)*(target_norm.clamp_max(self.radius).expand(-1,2))
+        # target_pos2[...,:2] = target_pos[...,:2].clamp(-self.env_width, self.env_width)
+        # target_reverse = 1-(target_pos != target_pos2)*2.0
 
         target_vel = self.target.get_velocities()
-        target_vel[..., :3] = self._get_dummy_policy_prey() * target_reverse
-        target_vel[..., 2] = 0 # z and dz/dt must be both restricted
-
-        self.drone.set_velocities(agent_vel, self.env_ids)
+        # target_vel[..., :3] = torch.tensor([1., 2., 0.],device=self.device)
+        target_vel[..., :3] = self._get_dummy_policy_prey()
+        target_bounce = (target_norm.expand(-1,3)<=self.radius)*1.0
+        target_vel[...,:3] = target_vel[...,:3]*target_bounce + \
+            self.bounce(target_vel[...,:3], target_pos2[...,:3])*(1 - target_bounce)
+        target_pos2[...,2] = 0.5
+        
+        # agent_vel[..., :3] *= agent_reverse
+        self.target.set_world_poses(target_pos2 + self.envs_positions, target_rot, self.env_ids)
+        target_vel[..., 2] = 0 # z and dz/dt must be both restricted   
         self.target.set_velocities(target_vel, self.env_ids)
 
     
@@ -162,8 +177,8 @@ class Prey(IsaacEnv):
         prey_state = self.target.get_world_poses()[0] - self.drone._envs_positions.squeeze(1)
         drone_state = self.drone.get_state()
         prey_pos = prey_state.unsqueeze(1).expand(-1,self.num_agents,-1)
-        # obs = torch.cat((drone_state, prey_pos, self.progress_buf2.unsqueeze(-1).expand(-1,self.num_agents).unsqueeze(-1)/self.cfg.env.max_episode_length),-1)
-        obs = torch.cat((drone_state, prey_pos),-1)
+        obs = torch.cat((drone_state, prey_pos, self.progress_buf2.unsqueeze(-1).expand(-1,self.num_agents).unsqueeze(-1)/self.cfg.env.max_episode_length),-1)
+        # obs = torch.cat((drone_state, prey_pos),-1)
 
         return TensorDict({
             "drone.obs": obs
@@ -214,10 +229,16 @@ class Prey(IsaacEnv):
         orient = (prey_pos - pos)/dist_pos
         b = 1
         force = (orient*1.0/dist_pos).sum(-2)
-        force += torch.tensor([1.,0.,0.], device=self.device)/(0.1+prey_state[...,0]+self.env_width).unsqueeze(-1)
-        force += torch.tensor([-1.,0.,0.], device=self.device)/(0.1-prey_state[...,0]+self.env_width).unsqueeze(-1)
-        force += torch.tensor([0.,1.,0.], device=self.device)/(0.1+prey_state[...,1]+self.env_width).unsqueeze(-1)
-        force += torch.tensor([0.,-1.,0.], device=self.device)/(0.1-prey_state[...,1]+self.env_width).unsqueeze(-1)
+        force_r = prey_state*0
+        norm_r = (torch.norm(prey_state[..., :2], dim=-1)+1e-5).unsqueeze(-1).expand(-1, 2)
+        force_r[..., :2] = prey_state[..., :2] / (norm_r - self.radius) / norm_r
+        force += force_r
+
+        # 4 walls
+        # force += torch.tensor([1.,0.,0.], device=self.device)/(0.1+prey_state[...,0]+self.env_width).unsqueeze(-1)
+        # force += torch.tensor([-1.,0.,0.], device=self.device)/(0.1-prey_state[...,0]+self.env_width).unsqueeze(-1)
+        # force += torch.tensor([0.,1.,0.], device=self.device)/(0.1+prey_state[...,1]+self.env_width).unsqueeze(-1)
+        # force += torch.tensor([0.,-1.,0.], device=self.device)/(0.1-prey_state[...,1]+self.env_width).unsqueeze(-1)
         vel = force/(torch.norm(force,dim=-1).unsqueeze(1).expand(-1,3)+1e-5)*self.v0.expand(-1,3)
         return vel
     
@@ -242,3 +263,11 @@ class Prey(IsaacEnv):
         # 这里只能用指针实现？
         self.success_buf += tensordict['next']['caught'].sum(-1).expand(self.num_envs)/self.cfg.env.num_envs*100.0 - self.success_buf
         return tensordict
+    
+    def bounce(self, v, t):
+        # 二维碰撞
+        assert v.size() == t.size()
+        t[..., 2] = 0
+        t /= torch.norm(t, dim=-1).unsqueeze(-1).expand_as(t)
+        v -= 2*(v*t).sum(-1).unsqueeze(-1).expand_as(v)
+        return v

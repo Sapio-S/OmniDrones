@@ -16,7 +16,7 @@ from functorch import vmap
 def main(cfg):
     cfg.train = 0
     cfg.wandb.mode = 'disabled'
-    cfg.env.num_envs = 4
+    cfg.env.num_envs = 128
     cfg.headless = 1
     cfg.use_load = 1
     OmegaConf.resolve(cfg)
