@@ -17,7 +17,7 @@ def main(cfg):
     cfg.train = 0
     cfg.wandb.mode = 'disabled'
     cfg.env.num_envs = 4
-    cfg.headless = 0
+    cfg.headless = 1
     cfg.use_load = 1
     OmegaConf.resolve(cfg)
     OmegaConf.set_struct(cfg, False)

@@ -50,7 +50,9 @@ class Prey(IsaacEnv):
 
     def _design_scene(self):
         self.num_agents = 3
-        self.v0 = 0.5
+        self.v_low = 0.5
+        self.v_high = self.v_low * 1.2
+        self.v0 = torch.from_numpy(np.random.uniform(self.v_low, self.v_high, [self.num_envs, 1])).to(self.device)
         cfg = RobotCfg()
         cfg.rigid_props.max_linear_velocity = 0.5
         self.drone: MultirotorBase = MultirotorBase.REGISTRY["Crazyflie"](cfg=cfg)
@@ -110,6 +112,7 @@ class Prey(IsaacEnv):
         n = self.num_agents
         _, rot = self.init_poses
         self.drone._reset_idx(env_ids)
+        self.v0 = torch.from_numpy(np.random.uniform(self.v_low, self.v_high, [self.num_envs, 1])).to(self.device)
         pos = torch.rand(len(env_ids), n, 3, device=self.device) * self.init_pos_scale + self.init_pos_offset
         self.drone.set_env_poses(pos, rot[env_ids], env_ids)
         self.drone.set_velocities(torch.zeros_like(self.vels[env_ids]), env_ids)
@@ -215,7 +218,7 @@ class Prey(IsaacEnv):
         force += torch.tensor([-1.,0.,0.], device=self.device)/(0.1-prey_state[...,0]+self.env_width).unsqueeze(-1)
         force += torch.tensor([0.,1.,0.], device=self.device)/(0.1+prey_state[...,1]+self.env_width).unsqueeze(-1)
         force += torch.tensor([0.,-1.,0.], device=self.device)/(0.1-prey_state[...,1]+self.env_width).unsqueeze(-1)
-        vel = force/(torch.norm(force,dim=-1).unsqueeze(1).expand(-1,3)+1e-5)*self.v0
+        vel = force/(torch.norm(force,dim=-1).unsqueeze(1).expand(-1,3)+1e-5)*self.v0.expand(-1,3)
         return vel
     
     def _get_dummy_policy_drone(self):
@@ -236,5 +239,6 @@ class Prey(IsaacEnv):
         tensordict["next"].update(self._compute_reward_and_done())
         # done决定重置，用buf2解决；buf代表第一次抓到的步数
         self.progress_buf += (1 - tensordict['next']['caught'])*1
+        # 这里只能用指针实现？
         self.success_buf += tensordict['next']['caught'].sum(-1).expand(self.num_envs)/self.cfg.env.num_envs*100.0 - self.success_buf
         return tensordict
