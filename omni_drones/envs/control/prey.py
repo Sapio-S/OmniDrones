@@ -114,6 +114,7 @@ class Prey(IsaacEnv):
         _, rot = self.init_poses
         self.drone._reset_idx(env_ids)
         self.v0 = torch.from_numpy(np.random.uniform(self.v_low, self.v_high, [self.num_envs, 1])).to(self.device)
+        self.v0 = torch.from_numpy(np.random.uniform(self.v_low, self.v_high, [self.num_envs, 1])).to(self.device)
         pos = torch.rand(len(env_ids), n, 3, device=self.device) * self.init_pos_scale + self.init_pos_offset
         self.drone.set_env_poses(pos, rot[env_ids], env_ids)
         self.drone.set_velocities(torch.zeros_like(self.vels[env_ids]), env_ids)
@@ -260,6 +261,7 @@ class Prey(IsaacEnv):
         tensordict["next"].update(self._compute_reward_and_done())
         # done决定重置，用buf2解决；buf代表第一次抓到的步数
         self.progress_buf += (1 - tensordict['next']['caught'])*1
+        # 这里只能用指针实现？
         # 这里只能用指针实现？
         self.success_buf += tensordict['next']['caught'].sum(-1).expand(self.num_envs)/self.cfg.env.num_envs*100.0 - self.success_buf
         return tensordict

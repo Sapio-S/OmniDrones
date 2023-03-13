@@ -17,7 +17,7 @@ from functorch import vmap
 @hydra.main(version_base=None, config_path=CONFIG_PATH, config_name="config")
 def main(cfg):
     cfg.use_load = 0
-    # cfg.wandb.mode = 'disabled'
+    cfg.wandb.mode = 'disabled'
     # cfg.env.num_envs = 16
     OmegaConf.resolve(cfg)
     OmegaConf.set_struct(cfg, False)
