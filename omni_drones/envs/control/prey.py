@@ -238,7 +238,7 @@ class Prey(IsaacEnv):
 
     
     def _get_dummy_policy_prey(self):
-        b = 2
+        b = 1
         pos, rot = self.drone.get_env_poses(False)
         prey_state = self.target.get_world_poses()[0] - self.drone._envs_positions.squeeze(1)
         prey_pos = prey_state.unsqueeze(1).expand(-1,self.num_agents,-1)
@@ -247,7 +247,7 @@ class Prey(IsaacEnv):
         force = (orient*1.0/dist_pos).sum(-2)
         force_r = prey_state*0
         norm_r = (torch.norm(prey_state[..., :2], dim=-1)+1e-5).unsqueeze(-1).expand(-1, 2)
-        force_r[..., :2] = - prey_state[..., :2]  / norm_r * (1/(self.radius - norm_r) > 1.0/(self.radius-0.1))
+        force_r[..., :2] = - prey_state[..., :2]  / norm_r * 1/(self.radius - norm_r) * (norm_r > 0.1) #damn you! it works.
         force += b*force_r
         
 
