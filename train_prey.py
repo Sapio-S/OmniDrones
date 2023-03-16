@@ -17,7 +17,7 @@ from functorch import vmap
 @hydra.main(version_base=None, config_path=CONFIG_PATH, config_name="config")
 def main(cfg):
     cfg.use_load = 0
-    cfg.wandb.mode = 'disabled'
+    # cfg.wandb.mode = 'disabled'
     # cfg.env.num_envs = 16
     OmegaConf.resolve(cfg)
     OmegaConf.set_struct(cfg, False)
@@ -61,8 +61,8 @@ def main(cfg):
 
     logger = LogOnEpisode(
         cfg.env.num_envs,
-        in_keys=["return", "progress", "success"],
-        log_keys=["train/return", "train/ep_length", "train/success_rate"],
+        in_keys=["return", "progress", "success", "end_point"],
+        log_keys=["train/return", "train/ep_length", "train/success_rate", "train/end_point"],
         logger_func=run.log
     )
         

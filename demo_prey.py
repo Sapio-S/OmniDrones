@@ -16,9 +16,11 @@ from functorch import vmap
 def main(cfg):
     cfg.train = 0
     cfg.wandb.mode = 'disabled'
-    cfg.env.num_envs = 128
-    cfg.headless = 1
+    cfg.env.num_envs = 2
+    cfg.headless = 0
     cfg.use_load = 1
+    # cfg.env.max_episode_length = 500
+    # cfg.env.env_spacing = 2
     OmegaConf.resolve(cfg)
     OmegaConf.set_struct(cfg, False)
     print(cfg.wandb)
